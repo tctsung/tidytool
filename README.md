@@ -4,7 +4,7 @@ Self-written toolkit for data cleaning, visualization, preprocessing, EDA, &amp;
 
 ## Table of content
 
-**eda.py**
+**data.py**
 
 * Basic info for data (`class Data.info()`): includes dtype, missingness, unique values
 * Simple preprocessing (`Data.clean()`): includes clean header, string processing, & standardize NAs
@@ -17,11 +17,15 @@ Class Data:
 
 * Diagnosis: identify primary key, visualize NA patterns, statistics summary, suggesstion for dtypes
 * transform dtypes in easy way (follow diagnosis | customized)
-* integrate LLM for diagnosis & more applications
+* integrate LLM/ML for diagnosis & more applications
 * save: metadata (dtypes, summary) & actual data
 * turn this into python pkg
 Class Vis:
 * visualization
+* wrapper for pgywalker
 
 Class Preprocess:
 * need to separate preprocess for all data, train data, test data
+
+Class Model:
+* wrapper for lazymodels

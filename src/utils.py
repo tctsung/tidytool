@@ -1,5 +1,22 @@
 import logging
 import os
+from datetime import datetime
+import pickle
+
+#############################
+# Internal helper functions #
+#############################
+
+
+def find_files(directory_path=".", file_extension=".json"):
+    # TODO: find all files in a directory with specific file extension
+    file_paths = []
+
+    for root, dirs, files in os.walk(directory_path):
+        for file in files:
+            if file.endswith(file_extension):
+                file_paths.append(os.path.join(root, file))
+    return file_paths
 
 
 def set_loggings(level=logging.INFO, func_name=""):
@@ -28,3 +45,18 @@ def set_loggings(level=logging.INFO, func_name=""):
         func_name,
         logging.getLevelName(logging.getLogger().getEffectiveLevel()),
     )
+
+
+def get_timestamp():
+    current_timestamp = datetime.now()
+    return current_timestamp.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def pickle_save(obj, file_path):
+    with open(file_path, "wb") as file:
+        pickle.dump(obj, file)
+
+
+def pickle_load(file_path):
+    with open(file_path, "rb") as file:
+        return pickle.load(file)

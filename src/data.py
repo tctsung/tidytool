@@ -7,9 +7,17 @@ import src.utils as utils  # assuming script path is tidytool/
 from collections import Counter
 from pprint import pprint, pformat
 from typing import Literal
+import os
 
 
 class Data:
+    read_methods = {
+        ".csv": pd.read_csv,
+        ".parquet": pd.read_parquet,
+        ".xlsx": pd.read_excel,
+        ".xls": pd.read_excel,
+    }
+
     def __init__(self, file, logging_level="info", display=True):
         """
         TODO: check data quality, understand the data
@@ -19,21 +27,28 @@ class Data:
         """
         # settings:
         utils.set_loggings(level=logging_level, func_name="EDA.Data")
-
+        self.file = file
         # load data:
-        if isinstance(file, pd.DataFrame):
-            self.before = file
-        else:
-            self.filepath = file
-            self.load()
+        self.load()
         # display basic info of data
         if display:
             self.info()
 
     def load(self):
-        """TODO: load data from file, will skip bad lines if needed"""
+        """Wrapper for different load_fileext methods"""
+        if isinstance(self.file, pd.DataFrame):  # load from DF
+            self.before = self.file
+        else:
+            # define a pd func to read file:
+            file_ext = os.path.splitext(self.file)[1].lower()
+            self.read_method = Data.read_methods.get(file_ext)
+            self.load_force()
+        self.after = self.before.copy()  # buffer for processed data
+
+    def load_force(self):
+        """TODO: load data from csv file, will skip bad lines if needed"""
         try:
-            self.before = pd.read_csv(self.filepath)
+            self.before = self.read_method(self.file)
         except:
             logging.warning(
                 "Input file ParserError. Bad lines are skipped & saved in .bad_lines"
@@ -45,15 +60,13 @@ class Data:
                 return None
 
             # save data as attr
-            self.before = pd.read_csv(
-                self.filepath, on_bad_lines=bad_line_handler, engine="python"
+            self.before = self.read_method(
+                self.file, on_bad_lines=bad_line_handler, engine="python"
             )
             self.bad_lines = bad_lines
-        # create buffer for processed data
-        self.after = self.before.copy()
 
     def info(
-        self, status: Literal["before", "after"] = "before", head=False, max_unique=3
+        self, status: Literal["before", "after"] = "after", head=False, max_unique=3
     ):
         """
         TODO: Some summary info of data, including data types, NA count, unique values, etc.
@@ -82,6 +95,7 @@ class Data:
         info_str = pformat(info)
 
         # collect df.head()
+        pd.set_option("display.max_columns", df.shape[1])  # to display all features
         head_info = df.head() if head else "Skipped"
 
         # display basic info of data
@@ -139,7 +153,10 @@ Data info (Data.ov):\n{info_str}
             if ori != new:
                 cnt += 1
                 name_log += f"{ori} -> {new}\n"
-        logging.info(f"{cnt} colnames were updated:\n{name_log}")
+        logging.info(
+            f"`clean_header` completed. {cnt} column names were updated:\n{name_log}"
+        )
+        self.ori_colnames = ori_colnames
 
     def replace_with_na(self, na_vals=[" ", "", "?"]):
         """TODO: Replace na_candidates with pd.NA"""
@@ -163,9 +180,9 @@ Data info (Data.ov):\n{info_str}
     def clean(
         self, na_vals=[" ", "", "?", np.nan, None], case="raw", header_keep_space=False
     ):
-        self.clean_header(keep_space=header_keep_space)
-        self.str_process(case=case)
-        self.replace_with_na(na_vals=na_vals)
+        self._clean_header(keep_space=header_keep_space)
+        self._str_process(case=case)
+        self._replace_with_na(na_vals=na_vals)
 
 
 # class Vis

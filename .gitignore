@@ -1,3 +1,6 @@
+# large data
+data/raw/backpack/*
+
 # temp files
 test.ipynb
 
