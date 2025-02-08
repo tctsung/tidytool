@@ -8,6 +8,10 @@ from collections import Counter
 from pprint import pprint, pformat
 from typing import Literal
 import os
+from datetime import datetime
+from zoneinfo import ZoneInfo
+import warnings
+import re
 
 
 class Data:
@@ -185,4 +189,92 @@ Data info (Data.ov):\n{info_str}
         self._replace_with_na(na_vals=na_vals)
 
 
-# class Vis
+class SmartDtype:
+    def __init__(
+        self, df, tolerance=0.95, timezone=None, max_size=1000, random_state=10
+    ):
+        """
+        TODO: transform dtype based on missingness
+        """
+        # setup args:
+        self.df = df
+        self.tolerance = tolerance
+        self.timezone = (
+            ZoneInfo(timezone) if timezone else datetime.now().astimezone().tzinfo
+        )
+        if df.shape[0] > max_size:
+            self.subset = df.sample(n=max_size, random_state=random_state)
+        else:
+            self.subset = df.copy()
+        # buffers:
+        self.dtypes = dict()
+
+    def diagnosis(self):
+        colnames = self.df.columns
+        for col in colnames:
+            if col not in self.dtypes:  # if proper dtype not identified
+                continue
+
+    def _time(self, col):
+        """
+        TODO: try transform to timedelta dtype; matches HH:MM, HH:MM:SS, day, hour, min, sec
+        Args:
+            col: column name in self.df
+        Eg. "02:03" -> 2hr 3 min
+        return:
+            TRUE if dtypes dictionary is updated
+            FALSE if ideal dtype not identified
+        """
+        feature = (
+            self.subset[col].dropna().astype(str)
+        )  # Ensure string type for regex matching
+        time_pattern = r"^\d{1,2}:\d{2}(:\d{2})?$"  # Matches HH:MM or HH:MM:SS
+        words = "|".join(["day", "hour", "minute", "second", "min", "sec", "hr"])
+        match_rate = (
+            feature.str.match(time_pattern).mean()
+            + feature.str.contains(words, case=False).mean()
+        )
+        if match_rate > self.tolerance:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=UserWarning)
+                transformed = pd.to_timedelta(feature, errors="coerce")
+            success_rate = transformed.notna().mean()  # Calculate success rate
+            if success_rate > self.tolerance:
+                self.dtypes[col] = "timedelta"
+                return True
+        return False
+
+    def _date(self, col):
+        """
+        TODO: try transform to date dtype
+        Args:
+            col: column name in self.df
+        Eg. 20240703 -> 2024/07/03 in datetime format
+        return:
+            TRUE if dtypes dictionary is updated
+            FALSE if ideal dtype not identified
+        """
+        feature = self.subset[col].dropna()
+        with warnings.catch_warnings():  # disable warning for incorrect types:
+            warnings.simplefilter("ignore", category=UserWarning)
+            formats = {
+                "ymd": pd.to_datetime(
+                    feature, errors="coerce", exact=False, yearfirst=True
+                ),
+                "dmy": pd.to_datetime(
+                    feature, errors="coerce", exact=False, dayfirst=True
+                ),
+                "mdy": pd.to_datetime(feature, errors="coerce", exact=False),
+            }
+        # check success rate:
+        best_format = max(formats, key=lambda k: formats[k].notna().mean())
+        success_rate = formats[best_format].notna().mean()  # success rate exclude NA
+        # record the dtype:
+        if success_rate > self.tolerance:
+            self.dtypes[col] = "date-" + best_format
+
+
+####### Helper functions ########
+
+
+####### Helper functions ########
