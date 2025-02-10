@@ -14,7 +14,17 @@ import warnings
 import re
 
 
-class Data:
+####### Helper functions #########
+def read_smart(file_path, read_as_str=False):
+    """
+    TODO: read table from file_path
+    Args:
+        file_path (str): table file path
+        read_as_str (bool): read all cols as string or not
+    return (tuple):
+        df, bad_lines
+    """
+    # supported methods for read()
     read_methods = {
         ".csv": pd.read_csv,
         ".parquet": pd.read_parquet,
@@ -22,52 +32,51 @@ class Data:
         ".xls": pd.read_excel,
     }
 
-    def __init__(self, file, logging_level="info", display=True):
+    # helper to save the bad lines:
+    def bad_line_handler(bad_line):
+        bad_lines.append(bad_line)
+        return None
+
+    # choose read method based on file extension
+    file_ext = os.path.splitext(file_path)[1].lower()
+    read_method = read_methods.get(file_ext)
+    read_args = {"dtype": str} if read_as_str else {}  # read all cols as str dtypes
+    bad_lines = []  # buffer to save bad lines
+
+    # read file:
+    df = read_method(
+        file_path,
+        on_bad_lines=bad_line_handler,
+        engine="python",
+        **read_args,
+    )
+    if bad_lines:  # if bad lines exist
+        logging.warning(f"ParserError: following bad lines are skipped:\n{bad_lines}")
+    return df, bad_lines
+
+
+class Data:
+    def __init__(self, file_path, logging_level="info"):
         """
         TODO: check data quality, understand the data
         Args:
-            file (str/pd.DF): The file path/DF to be analyzed. (only support csv for now)
+            file_path (str/pd.DF): The file path/DF to be analyzed. (only support csv for now)
             logging_level (str, optional): The logging level to be used. Defaults to "info".
         """
-        # settings:
-        utils.set_loggings(level=logging_level, func_name="EDA.Data")
-        self.file = file
+        # setup:
+        utils.set_loggings(level=logging_level, func_name="tidytools.data.Data")
+        self.file_path = file_path
         # load data:
-        self.load()
-        # display basic info of data
-        if display:
-            self.info()
+        self.read()  # read file based on extension
 
-    def load(self):
-        """Wrapper for different load_fileext methods"""
-        if isinstance(self.file, pd.DataFrame):  # load from DF
-            self.before = self.file
+    def read(self):
+        """TODO: read input file | load input dataframe"""
+        if isinstance(self.file_path, pd.DataFrame):  # load from DF
+            self.raw = self.file_path
         else:
-            # define a pd func to read file:
-            file_ext = os.path.splitext(self.file)[1].lower()
-            self.read_method = Data.read_methods.get(file_ext)
-            self.load_force()
-        self.after = self.before.copy()  # buffer for processed data
-
-    def load_force(self):
-        """TODO: load data from csv file, will skip bad lines if needed"""
-        try:
-            self.before = self.read_method(self.file)
-        except:
-            logging.warning(
-                "Input file ParserError. Bad lines are skipped & saved in .bad_lines"
-            )
-            bad_lines = []  # buffer to save bad lines
-
-            def bad_line_handler(bad_line):
-                bad_lines.append(bad_line)  # save the bad line content
-                return None
-
-            # save data as attr
-            self.before = self.read_method(
-                self.file, on_bad_lines=bad_line_handler, engine="python"
-            )
-            self.bad_lines = bad_lines
+            # read file based on extension, all col as string
+            self.raw, self.bad_lines = read_smart(self.file_path, read_as_str=True)
+        self.df = self.raw.copy()  # buffer for processed data
 
     def info(
         self, status: Literal["before", "after"] = "after", head=False, max_unique=3
@@ -121,12 +130,12 @@ Data info (Data.ov):\n{info_str}
         def clean_str(x):
             # x: pandas series
             return (
-                x.replace(r"['\"]", "", regex=True)
-                .str.strip()
-                .replace(r"\s+", " ", regex=True)
+                x.replace(r"['\"]", "", regex=True)  # rm ' and "
+                .str.strip()  # strip space
+                .replace(r"\s+", " ", regex=True)  # multiple space to one space
             )
 
-        # strip space:
+        # string cleaning:
         self.after = self.after.apply(
             lambda x: (clean_str(x) if x.dtype == "object" else x)
         )
@@ -191,29 +200,41 @@ Data info (Data.ov):\n{info_str}
 
 class SmartDtype:
     def __init__(
-        self, df, tolerance=0.95, timezone=None, max_size=1000, random_state=10
+        self, input, tolerance=0.95, timezone=None, max_size=1000, random_state=10
     ):
         """
+        Helper for class Data
         TODO: transform dtype based on missingness
         """
         # setup args:
-        self.df = df
+        if isinstance(input, pd.DataFrame):
+            self.df = input.astype(str)  # force all dtypes to str
+        else:
+            self.df, _ = read_smart(input, read_as_str=True)
         self.tolerance = tolerance
         self.timezone = (
             ZoneInfo(timezone) if timezone else datetime.now().astimezone().tzinfo
         )
-        if df.shape[0] > max_size:
-            self.subset = df.sample(n=max_size, random_state=random_state)
+
+        # limit subset size:
+        if self.df.shape[0] > max_size:
+            self.subset = self.df.sample(n=max_size, random_state=random_state)
         else:
-            self.subset = df.copy()
+            self.subset = self.df.copy()
         # buffers:
         self.dtypes = dict()
 
     def diagnosis(self):
         colnames = self.df.columns
+        # functions to check dtype in order
+        check_funcs = [self._bool, self._time, self._date, self._numeric]
         for col in colnames:
-            if col not in self.dtypes:  # if proper dtype not identified
-                continue
+            for check in check_funcs:
+                if check(col):
+                    print(col, str(check))
+                    break
+            if col not in self.dtypes:
+                self.dtypes[col] = {"dtype": "string"}
 
     def _time(self, col):
         """
@@ -240,13 +261,15 @@ class SmartDtype:
                 transformed = pd.to_timedelta(feature, errors="coerce")
             success_rate = transformed.notna().mean()  # Calculate success rate
             if success_rate > self.tolerance:
-                self.dtypes[col] = "timedelta"
+                self.dtypes[col] = {
+                    "dtype": "timedelta",
+                    "success_rate": float(success_rate),
+                }
                 return True
-        return False
 
     def _date(self, col):
         """
-        TODO: try transform to date dtype
+        TODO: try transform to datetime dtype
         Args:
             col: column name in self.df
         Eg. 20240703 -> 2024/07/03 in datetime format
@@ -257,24 +280,54 @@ class SmartDtype:
         feature = self.subset[col].dropna()
         with warnings.catch_warnings():  # disable warning for incorrect types:
             warnings.simplefilter("ignore", category=UserWarning)
-            formats = {
-                "ymd": pd.to_datetime(
-                    feature, errors="coerce", exact=False, yearfirst=True
-                ),
-                "dmy": pd.to_datetime(
-                    feature, errors="coerce", exact=False, dayfirst=True
-                ),
-                "mdy": pd.to_datetime(feature, errors="coerce", exact=False),
-            }
+            transformed = pd.to_datetime(feature, errors="coerce")
         # check success rate:
-        best_format = max(formats, key=lambda k: formats[k].notna().mean())
-        success_rate = formats[best_format].notna().mean()  # success rate exclude NA
+        success_rate = transformed.notna().mean()  # success rate exclude NA
         # record the dtype:
         if success_rate > self.tolerance:
-            self.dtypes[col] = "date-" + best_format
+            self.dtypes[col] = {"dtype": "date", "success_rate": float(success_rate)}
+            return True
 
+    def _bool(self, col, pairs=[["no", "yes"], [False, True], [0, 1]]):
+        """
+        TODO: try transform to boolean dtype
+        Only col with unique value as one of the provided pairs will be labeled as boolean
+        Args:
+            col: column name in self.df
+            pairs: nested list, pairs that should be treated as boolean: [false_val, true_val]
+        """
+        feature = (
+            self.subset[col].dropna().str.lower()
+        )  # turn to lower case for comparison
+        unique_values = set(feature.unique())
+        if len(unique_values) == 2:
+            for pair in pairs:
+                pair = set(map(lambda x: str(x).lower(), pair))  # turn to lower case
+                if pair == unique_values:
+                    false_val, true_val = pair
+                    # mapping param is for dtype transformation
+                    self.dtypes[col] = {
+                        "dtype": "boolean",
+                        "mapping": {true_val: True, false_val: False},
+                    }
+                    return True
 
-####### Helper functions ########
+    def _numeric(self, col):
+        feature = self.subset[col].dropna()
+        # turn to numeric:
+        transformed = pd.to_numeric(feature, errors="coerce")
+        success_rate = transformed.notna().mean()
+        if success_rate > self.tolerance:  # if can be treated as numeric
+            if (transformed % 1 == 0).all():
+                dtype = "integer"
+            else:
+                dtype = "float"
+            self.dtypes[col] = {"dtype": dtype, "success_rate": float(success_rate)}
+            return True
+
+    def _bool_transform(self, col):
+        mapping = self.dtypes[col]["mapping"]  # mapping for boolean transformation
+        self.df[col] = self.df[col].str.lower().map(mapping)  # transform
 
 
 ####### Helper functions ########
