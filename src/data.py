@@ -50,12 +50,13 @@ def read_smart(file_path, read_as_str=False):
         engine="python",
         **read_args,
     )
+
     if bad_lines:  # if bad lines exist
         logging.warning(f"ParserError: following bad lines are skipped:\n{bad_lines}")
     return df, bad_lines
 
 
-class Data:
+class DataClean:
     def __init__(self, file_path, logging_level="info"):
         """
         TODO: check data quality, understand the data
@@ -75,54 +76,73 @@ class Data:
             self.raw = self.file_path
         else:
             # read file based on extension, all col as string
-            self.raw, self.bad_lines = read_smart(self.file_path, read_as_str=True)
-        self.df = self.raw.copy()  # buffer for processed data
+            self.raw, self.bad_lines = read_smart(self.file_path, read_as_str=False)
+            # buffer for processed data:
+            self.df, _ = read_smart(self.file_path, read_as_str=True)
 
-    def info(
-        self, status: Literal["before", "after"] = "after", head=False, max_unique=3
-    ):
+    def head(self):
+        pd.set_option(
+            "display.max_columns", self.raw.shape[1]
+        )  # to display all features
+        raw_head = pformat(self.raw.head())
+        df_head = pformat(self.df.head())
+        logging.critical(
+            f"""
+Raw data:\n{raw_head}
+Processed data:\n{df_head}
+"""
+        )
+
+    def _update_dtype(self):
+        smartd = SmartDtype(input=self.df)
+        smartd.transform()  # turn self.df to recommended dtypes
+        self.df = smartd.df
+        # self.recommend_dtypes = pd.DataFrame.from_dict(smartd.dtypes, orient="index")
+
+    def summary(self, max_unique=3):
         """
         TODO: Some summary info of data, including data types, NA count, unique values, etc.
         Args:
-            data (Literal['before', 'after']): State of data to be summarized
             head (bool, optional): If True, display first few rows of data
             max_unique (int, optional): Max no. of unique values to display for each feature
         Attrs:
-            ov (pd.DataFrame): Each row represents a feature info
+            info (pd.DataFrame): Each row represents a feature info
                 - dtype: Data type of each feature.
                 - NA_count: Proportion of missing values in each feature.
                 - n_unique: Number of unique values in each feature.
                 - examples: Examples of unique values in each feature.
         """
-        df = self.before if status == "before" else self.after  # select data
-        pd.set_option(
-            "display.max_rows", max(df.shape[1], 10)
-        )  # to display all features
 
-        top_unique = lambda x, n=max_unique: x.unique()[:n]  # get top n unique values
+        def get_summary(df, label):
+            # get top n unique values without NA
+            top_unique = lambda x, n=max_unique: x.dropna().unique()[:n]
+            res = df.apply(
+                lambda x: (x.dtype, x.isna().mean(), x.nunique(), top_unique(x)), axis=0
+            ).T
+            res.columns = pd.MultiIndex.from_product(
+                [[label], ["dtype", "NA_count", "n_unique", "examples"]]
+            )
+            return res
 
-        info = df.apply(
-            lambda x: (x.dtype, x.isna().mean(), x.nunique(), top_unique(x)), axis=0
-        ).T
-        info.columns = ["dtype", "NA_count", "n_unique", "examples"]
+        # Get summary for raw and transformed data
+        raw_info = get_summary(self.raw, "Raw")
+        transformed_info = get_summary(self.df, "Transformed")
+        raw_info.index = transformed_info.index = (
+            raw_info.index + " -> " + transformed_info.index
+        )
+        # Combine both into a MultiIndex DataFrame
+        info = pd.concat([raw_info, transformed_info], axis=1)
+
+        # display all features
+        pd.set_option("display.max_rows", max(self.raw.shape[1], 10))
         info_str = pformat(info)
 
-        # collect df.head()
-        pd.set_option("display.max_columns", df.shape[1])  # to display all features
-        head_info = df.head() if head else "Skipped"
-
         # display basic info of data
-        logging.critical(
-            f"""Status: {status}\n
-Table Dimension: {df.shape}\n
-Data types summary:\n{df.dtypes.value_counts()}\n
-Head of data:\n{head_info}\n
-Data info (Data.ov):\n{info_str}
-"""
-        )
-        self.ov = info
+        logging.critical(f"Table Dimension: {self.raw.shape}")
+        self.info = info
+        display(info)
 
-    def str_process(self, case: Literal["raw", "upper", "lower"] = "raw"):
+    def _str_process(self, case: Literal["raw", "upper", "lower"] = "raw"):
         """
         TODO: string processing, including space stripping, case-changing
         """
@@ -136,30 +156,28 @@ Data info (Data.ov):\n{info_str}
             )
 
         # string cleaning:
-        self.after = self.after.apply(
-            lambda x: (clean_str(x) if x.dtype == "object" else x)
-        )
+        self.df = self.df.apply(lambda x: (clean_str(x) if x.dtype == "object" else x))
         # change case:
         if case == "upper":
-            self.after = self.after.apply(
+            self.df = self.df.apply(
                 lambda x: x.str.upper() if x.dtype == "object" else x
             )
         elif case == "lower":
-            self.after = self.after.apply(
+            self.df = self.df.apply(
                 lambda x: x.str.lower() if x.dtype == "object" else x
             )
 
-    def clean_header(self, keep_space=False):
+    def _clean_header(self, keep_space=False):
         """Strip space & single/double quotes for column names."""
-        ori_colnames = self.before.columns
+        ori_colnames = self.raw.columns
         colnames = (
-            self.before.columns.str.replace(r"['\"]", "", regex=True)  # rm quotes
+            self.raw.columns.str.replace(r"['\"]", "", regex=True)  # rm quotes
             .str.replace(r"\s+", " ", regex=True)  # long space to single space
             .str.strip()  # strip space
         )
         if not keep_space:
             colnames = colnames.str.replace(" ", "_")  # turn space to underscore
-        self.after.columns = colnames
+        self.df.columns = colnames
         name_log = ""  # buffer to changed names
         cnt = 0  # count changed names
         for ori, new in zip(ori_colnames, colnames):  # display changed names
@@ -171,30 +189,34 @@ Data info (Data.ov):\n{info_str}
         )
         self.ori_colnames = ori_colnames
 
-    def replace_with_na(self, na_vals=[" ", "", "?"]):
+    def _replace_with_na(self, na_vals=[" ", "", "?", "nan", "NA"]):
         """TODO: Replace na_candidates with pd.NA"""
         # merge list into regex pattern:
         na_vals.extend([np.nan, None])  # standardize na values
 
         # get colnames of each gp:
-        float_cols = self.after.select_dtypes(include=["float"]).columns
-        date_cols = self.after.select_dtypes(include=["datetime"]).columns
-        other_cols = self.after.select_dtypes(exclude=["float", "datetime"]).columns
+        float_cols = self.df.select_dtypes(include=["float"]).columns
+        date_cols = self.df.select_dtypes(include=["datetime"]).columns
+        other_cols = self.df.select_dtypes(exclude=["float", "datetime"]).columns
 
         # use np.nan for float:
-        self.after[float_cols] = self.after[float_cols].replace(na_vals, np.nan)
+        self.df[float_cols] = self.df[float_cols].replace(na_vals, np.nan)
 
         # use pd.NaT for datetime:
-        self.after[date_cols] = self.after[date_cols].replace(na_vals, pd.NaT)
+        self.df[date_cols] = self.df[date_cols].replace(na_vals, pd.NaT)
 
         # use pd.NA for other types:
-        self.after[other_cols] = self.after[other_cols].replace(na_vals, pd.NA)
+        self.df[other_cols] = self.df[other_cols].replace(na_vals, pd.NA)
 
     def clean(
-        self, na_vals=[" ", "", "?", np.nan, None], case="raw", header_keep_space=False
+        self,
+        na_vals=[" ", "", "?", "nan", "NA"],
+        case="raw",
+        header_keep_space=False,
     ):
         self._clean_header(keep_space=header_keep_space)
         self._str_process(case=case)
+        self._update_dtype()
         self._replace_with_na(na_vals=na_vals)
 
 
@@ -209,6 +231,8 @@ class SmartDtype:
         # setup args:
         if isinstance(input, pd.DataFrame):
             self.df = input.astype(str)  # force all dtypes to str
+            # missing value could be string "nan":
+            self.df.replace(["nan"], pd.NA, inplace=True)
         else:
             self.df, _ = read_smart(input, read_as_str=True)
         self.tolerance = tolerance
@@ -224,17 +248,53 @@ class SmartDtype:
         # buffers:
         self.dtypes = dict()
 
-    def diagnosis(self):
+    def transform(self):
+        """
+        TODO: transform data type based on diagnosis
+        """
+        self.diagnosis(transform=True)
+
+    def diagnosis(self, transform=False):
+        """
+        TODO: identify proper dtype for each col
+        Args:
+            transform (bool): if True, will transform the dtype directly
+        Return:
+            self.dtypes (dict): contain the recommended dtypes
+        """
         colnames = self.df.columns
         # functions to check dtype in order
         check_funcs = [self._bool, self._time, self._date, self._numeric]
         for col in colnames:
-            for check in check_funcs:
-                if check(col):
-                    print(col, str(check))
-                    break
             if col not in self.dtypes:
-                self.dtypes[col] = {"dtype": "string"}
+                for check in check_funcs:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore", category=UserWarning)
+                        if check(col):  # check dtype
+                            break
+                # set dtype to string if none of the check is True:
+                self.dtypes[col] = self.dtypes.get(col, {"dtype": "string"})
+            if transform:
+                self._transform(col)
+
+    def _transform(self, col):
+        """
+        TODO: transform dtypes based on self.dtypes
+        """
+        dtype = self.dtypes[col]["dtype"]
+        feature = self.df[col]
+        if dtype == "boolean":  # transform to T/F
+            mapping = self.dtypes[col]["mapping"]
+            self.df[col] = feature.str.lower().map(mapping).astype(bool)
+        elif dtype == "timedelta":
+            self.df[col] = pd.to_timedelta(feature, errors="coerce")
+        elif dtype == "date":
+            self.df[col] = pd.to_datetime(feature, errors="coerce")
+            self.df[col] = self.df[col].dt.tz_localize(self.timezone)  # set timezone
+        elif dtype == "float":
+            self.df[col] = pd.to_numeric(feature, errors="coerce")
+        elif dtype == "integer":
+            self.df[col] = pd.to_numeric(feature, errors="coerce").astype("Int64")
 
     def _time(self, col):
         """
@@ -256,9 +316,7 @@ class SmartDtype:
             + feature.str.contains(words, case=False).mean()
         )
         if match_rate > self.tolerance:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", category=UserWarning)
-                transformed = pd.to_timedelta(feature, errors="coerce")
+            transformed = pd.to_timedelta(feature, errors="coerce")
             success_rate = transformed.notna().mean()  # Calculate success rate
             if success_rate > self.tolerance:
                 self.dtypes[col] = {
@@ -278,15 +336,20 @@ class SmartDtype:
             FALSE if ideal dtype not identified
         """
         feature = self.subset[col].dropna()
-        with warnings.catch_warnings():  # disable warning for incorrect types:
-            warnings.simplefilter("ignore", category=UserWarning)
+        # count no. of digits
+        digit_len = feature.str.replace(r"\D", "", regex=True).str.len()
+        # must contain 6 digits to be considered a date
+        if (digit_len >= 6).mean() > self.tolerance:
             transformed = pd.to_datetime(feature, errors="coerce")
-        # check success rate:
-        success_rate = transformed.notna().mean()  # success rate exclude NA
-        # record the dtype:
-        if success_rate > self.tolerance:
-            self.dtypes[col] = {"dtype": "date", "success_rate": float(success_rate)}
-            return True
+            # check success rate:
+            success_rate = transformed.notna().mean()  # success rate exclude NA
+            # record the dtype:
+            if success_rate > self.tolerance:
+                self.dtypes[col] = {
+                    "dtype": "date",
+                    "success_rate": float(success_rate),
+                }
+                return True
 
     def _bool(self, col, pairs=[["no", "yes"], [False, True], [0, 1]]):
         """
@@ -324,10 +387,6 @@ class SmartDtype:
                 dtype = "float"
             self.dtypes[col] = {"dtype": dtype, "success_rate": float(success_rate)}
             return True
-
-    def _bool_transform(self, col):
-        mapping = self.dtypes[col]["mapping"]  # mapping for boolean transformation
-        self.df[col] = self.df[col].str.lower().map(mapping)  # transform
 
 
 ####### Helper functions ########
