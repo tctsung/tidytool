@@ -4,7 +4,7 @@ import pandas as pd
 import itertools
 from typing import Literal
 from upsetplot import plot as _plot_upset
-from matplotlib_venn import venn2, venn3
+from matplotlib_venn import venn2, venn3, venn3_circles, venn2_circles
 import warnings
 
 # block Upset plot FutureWarnings:
@@ -61,14 +61,53 @@ class SetDifference:
         self.set_diff_data = impute_output
 
     def _plot_venn2(self, **kwargs):
+        fig, ax = plt.subplots(figsize=(8, 6))  # Create figure and axes
+
         val_10 = self.set_diff_data.loc[(True, False)]
         val_01 = self.set_diff_data.loc[(False, True)]
         val_11 = self.set_diff_data.loc[(True, True)]
-        return venn2(
-            subsets=(val_10, val_01, val_11), set_labels=self.category_columns, **kwargs
+
+        # Convert counts to percentages
+        total_count = self.set_diff_data.sum()
+        subsets = (
+            val_10 / total_count * 100,
+            val_01 / total_count * 100,
+            val_11 / total_count * 100,
         )
 
+        # Draw Venn diagram with labels (no fill)
+        venn_diagram = venn2(
+            subsets=subsets,
+            set_labels=self.category_columns,
+            alpha=0.0,  # No fill (transparent)
+            subset_label_formatter=lambda x: f"{x:.2f}%",  # Format as percentage
+            ax=ax,  # Pass the axes to venn2
+            **kwargs,
+        )
+
+        # Draw circles with custom colors and solid lines
+        c = venn2_circles(
+            subsets=subsets,
+            linestyle="solid",
+            linewidth=1,
+            alpha=0.5,
+            ax=ax,  # Pass the axes to venn2_circles
+        )
+
+        # Define custom colors for circles & labels
+        set_colors = ["darkblue", "darkred"]  # Example colors, adjust as needed
+        c[0].set_edgecolor(set_colors[0])  # Set color for first circle
+        c[1].set_edgecolor(set_colors[1])  # Set color for second circle
+
+        # Match label colors to circle outline colors
+        for idx, label in enumerate(venn_diagram.set_labels or []):
+            label.set_color(set_colors[idx])
+
+        return fig
+
     def _plot_venn3(self, **kwargs):
+        fig, ax = plt.subplots(figsize=(8, 6))
+        # get each subset value:
         val_100 = self.set_diff_data.loc[(True, False, False)]
         val_010 = self.set_diff_data.loc[(False, True, False)]
         val_001 = self.set_diff_data.loc[(False, False, True)]
@@ -76,18 +115,51 @@ class SetDifference:
         val_101 = self.set_diff_data.loc[(True, False, True)]
         val_011 = self.set_diff_data.loc[(False, True, True)]
         val_111 = self.set_diff_data.loc[(True, True, True)]
-        return venn3(
-            subsets=(val_100, val_010, val_001, val_110, val_101, val_011, val_111),
-            set_labels=self.category_columns,
-            **kwargs
+        # Convert counts to percentages
+        total_count = self.set_diff_data.sum()
+        subsets = (
+            val_100 / total_count * 100,
+            val_010 / total_count * 100,
+            val_001 / total_count * 100,
+            val_110 / total_count * 100,
+            val_101 / total_count * 100,
+            val_011 / total_count * 100,
+            val_111 / total_count * 100,
         )
+        # Draw Venn diagram with labels:
+        venn_diagram = venn3(
+            subsets=subsets,
+            set_labels=self.category_columns,
+            alpha=0.0,  # No fill (transparent)
+            subset_label_formatter=lambda x: f"{x:.2f}%",  # Format as percentage
+            ax=ax,  # Pass the axes to venn3
+            **kwargs,
+        )
+        c = venn3_circles(
+            subsets=subsets,  # Ensure circles are drawn with the same colors
+            linestyle="solid",  # Solid lines for the circles
+            linewidth=1,
+            alpha=0.5,  # slightly transparent
+            ax=ax,  # Pass the axes to venn3
+        )
+        # define custom colors for circles & labels:
+        set_colors = ["darkblue", "darkred", "darkgreen"]
+        c[0].set_edgecolor(set_colors[0])  # Set color for first circle
+        c[1].set_edgecolor(set_colors[1])  # Set color for second circle
+        c[2].set_edgecolor(set_colors[2])  # Set color for third circle
+
+        # Match label colors to circle outline colors
+        for idx, label in enumerate(venn_diagram.set_labels or []):
+            label.set_color(set_colors[idx])
+
+        return fig
 
     def plot(
         self,
         use_upset: bool = None,
         category_columns: list = None,
         title=None,
-        **kwargs
+        **kwargs,
     ):
         """
         Plot the data using upsetplot or bar plot.
