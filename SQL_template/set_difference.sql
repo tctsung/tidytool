@@ -51,6 +51,4 @@ LEFT JOIN set3 AS s3
 
 -- Group by all the 'is_in_setN' boolean columns:
 GROUP BY 1, 2, 3  
--- Optional: Order the results for consistency
-ORDER BY 1, 2, 3
 ;
