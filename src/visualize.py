@@ -110,8 +110,8 @@ class SetDifference:
         # get each subset value:
         val_100 = self.set_diff_data.loc[(True, False, False)]
         val_010 = self.set_diff_data.loc[(False, True, False)]
-        val_001 = self.set_diff_data.loc[(False, False, True)]
         val_110 = self.set_diff_data.loc[(True, True, False)]
+        val_001 = self.set_diff_data.loc[(False, False, True)]
         val_101 = self.set_diff_data.loc[(True, False, True)]
         val_011 = self.set_diff_data.loc[(False, True, True)]
         val_111 = self.set_diff_data.loc[(True, True, True)]
@@ -120,8 +120,8 @@ class SetDifference:
         subsets = (
             val_100 / total_count * 100,
             val_010 / total_count * 100,
-            val_001 / total_count * 100,
             val_110 / total_count * 100,
+            val_001 / total_count * 100,
             val_101 / total_count * 100,
             val_011 / total_count * 100,
             val_111 / total_count * 100,
