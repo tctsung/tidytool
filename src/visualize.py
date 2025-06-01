@@ -23,7 +23,8 @@ class SetDifference:
         # Identify category columns (all columns in the DataFrame except 'cnt')
         if self.category_columns is None:
             category_columns = [col for col in df.columns if col != "cnt"]
-
+        else:
+            category_columns = self.category_columns
         # data validation
         assert "cnt" in df.columns, "Count column 'cnt' not found in DataFrame."
         assert pd.api.types.is_numeric_dtype(
