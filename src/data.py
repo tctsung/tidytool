@@ -15,15 +15,19 @@ import re
 
 
 ####### Helper functions #########
-def read_smart(file_path, read_as_str=False):
+def read_smart(file, read_as_str=False):
     """
     TODO: read table from file_path
     Args:
-        file_path (str): table file path
+        file (str): table file path
         read_as_str (bool): read all cols as string or not
     return (tuple):
         df, bad_lines
     """
+    # check if input is already a DataFrame
+    if isinstance(file, pd.DataFrame):
+        return file, None  # return the DataFrame and no bad lines
+
     # supported methods for read()
     read_methods = {
         ".csv": pd.read_csv,
@@ -38,14 +42,14 @@ def read_smart(file_path, read_as_str=False):
         return None
 
     # choose read method based on file extension
-    file_ext = os.path.splitext(file_path)[1].lower()
+    file_ext = os.path.splitext(file)[1].lower()
     read_method = read_methods.get(file_ext)
     read_args = {"dtype": str} if read_as_str else {}  # read all cols as str dtypes
     bad_lines = []  # buffer to save bad lines
 
     # read file:
     df = read_method(
-        file_path,
+        file,
         on_bad_lines=bad_line_handler,
         engine="python",
         **read_args,

@@ -11,6 +11,139 @@ import warnings
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
 
+## Bar Plot
+def barplot_category_counts(
+    df,
+    col_category="category",
+    col_count="count",
+    title="Category Distribution",
+    highlight_top_k=10,
+    figsize=(12, 10),
+    textbox_font_size=12,
+):
+    """
+    Visualize categorical data as a bar chart with top categories highlighted.
+
+    Parameters:
+    df (pd.DataFrame): DataFrame with category and count columns.
+    col_category (str): Name of the category column.
+    col_count (str): Name of the count column.
+    title (str): Custom title for the chart.
+    highlight_top_k (int or None): The number of top categories to highlight.
+                                   If None, all categories are plotted uniformly.
+    figsize (tuple): Figure size for the plot.
+    """
+    df, _ = dat.read_smart(df)  # Ensure df is a DataFrame
+    # input validation:
+    assert (
+        col_category in df.columns
+    ), f"Column '{col_category}' not found in DataFrame."
+    assert col_count in df.columns, f"Column '{col_count}' not found in DataFrame."
+    total_count = df[col_count].sum()
+    assert (
+        total_count > 0
+    ), "Total count must be greater than zero to calculate percentages."
+
+    # --- 1. Modify highlight_top_k based on the number of categories ---
+    num_categories = df.shape[0]
+    if highlight_top_k is not None and highlight_top_k >= num_categories:
+        highlight_top_k = None
+
+    # Sort by count descending
+    df_sorted = df.sort_values(col_count, ascending=False).reset_index(drop=True)
+
+    # Keep only top 30 for plotting to maintain readability
+    df_plot = df_sorted.head(30)
+
+    # Create figure and axis
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # --- 2 & 3. Conditional plotting logic ---
+    if highlight_top_k is None:
+        # Case 2: No highlighting, plot all bars in orange
+        colors = ["#FF8C42"] * len(df_plot)
+        bars_to_label = len(df_plot)
+    else:
+        # Case 3: Highlight top k categories
+        num_orange = min(highlight_top_k, len(df_plot))
+        colors = ["#FF8C42"] * num_orange + ["#D3D3D3"] * (len(df_plot) - num_orange)
+        bars_to_label = num_orange
+
+    # Create horizontal bar chart
+    ax.barh(
+        range(len(df_plot)),
+        df_plot[col_count],
+        color=colors,
+        edgecolor="white",
+        linewidth=0.5,
+    )
+
+    # Invert y-axis so top categories appear at the top
+    ax.invert_yaxis()
+    x_min, x_max = ax.get_xlim()
+
+    # Add category labels
+    for i in range(bars_to_label):
+        ax.text(
+            df_plot[col_count].iloc[i] + (x_max * 0.01),
+            i,
+            df_plot[col_category].iloc[i],
+            ha="left",
+            va="center",
+            fontsize=10,
+        )
+
+    # Add details for the highlighted case
+    if highlight_top_k is not None and len(df_plot) > highlight_top_k:
+        # dotted line to separate highlighted area
+        line_pos = highlight_top_k - 0.5
+        ax.axhline(y=line_pos, color="black", linestyle="--", linewidth=1.5)
+
+        # Calculate statistics for the text box
+        total_count = df_sorted[col_count].sum()
+        top_k_count = df_sorted[col_count].head(highlight_top_k).sum()
+        top_k_percentage = (top_k_count / total_count) * 100
+
+        # --- 5. Move text box to the top right area ---
+        text_x_position = x_max * 0.98
+        text_y_position = line_pos + (len(df_plot) - line_pos) / 6
+
+        ax.text(
+            text_x_position,
+            text_y_position,
+            f"Top {highlight_top_k}: {top_k_percentage:.1f}%\n"
+            f"Total categories: {len(df_sorted):,}\n"
+            f"Total count: {total_count:,}",
+            ha="right",
+            va="center",
+            fontsize=textbox_font_size,
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.8),
+        )
+
+    # Customize the plot
+    ax.set_title(title, fontsize=16, fontweight="bold", pad=20)
+    ax.set_xlabel("Count", fontsize=12)
+    ax.set_ylabel("Categories (ordered by count)", fontsize=12)
+
+    # --- 6. Remove the black frame at right and top ---
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_linewidth(0.5)
+    ax.spines["bottom"].set_linewidth(0.5)
+
+    # Remove y-axis ticks for a cleaner look
+    ax.set_yticks([])
+
+    # Add a light grid for better readability
+    ax.grid(axis="x", alpha=0.3, linestyle="-", linewidth=0.5)
+    ax.set_axisbelow(True)
+
+    # Adjust layout and show the plot
+    plt.tight_layout()
+    plt.show()
+
+
+## Venn Diagram and Upset Plot for Set Differences:
 class SetDifference:
     def __init__(self, file_path):
         self.df, _ = dat.read_smart(file_path)
